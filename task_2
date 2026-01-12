@@ -1,0 +1,85 @@
+# mapreduce_words.py
+# downloads text by url, counts word frequency via mapreduce, visualizes top words
+
+import argparse
+import re
+from collections import Counter
+from typing import Dict, Iterable, List, Tuple
+
+import matplotlib.pyplot as plt
+import requests
+
+
+WORD_RE = re.compile(r"[a-zA-Zа-яА-ЯіїєґІЇЄҐ']+")
+
+
+def fetch_text(url: str, timeout: int = 10) -> str:
+    r = requests.get(url, timeout=timeout)
+    r.raise_for_status()
+    r.encoding = r.apparent_encoding
+    return r.text
+
+
+def tokenize(text: str) -> List[str]:
+    return [w.lower() for w in WORD_RE.findall(text)]
+
+
+def map_fn(words: Iterable[str]) -> List[Tuple[str, int]]:
+    return [(w, 1) for w in words]
+
+
+def shuffle(pairs: Iterable[Tuple[str, int]]) -> Dict[str, List[int]]:
+    grouped: Dict[str, List[int]] = {}
+    for w, c in pairs:
+        grouped.setdefault(w, []).append(c)
+    return grouped
+
+
+def reduce_fn(grouped: Dict[str, List[int]]) -> Dict[str, int]:
+    return {w: sum(counts) for w, counts in grouped.items()}
+
+
+def map_reduce_word_count(text: str) -> Dict[str, int]:
+    words = tokenize(text)
+    mapped = map_fn(words)
+    grouped = shuffle(mapped)
+    reduced = reduce_fn(grouped)
+    return reduced
+
+
+def visualize_top_words(freq: Dict[str, int], top_n: int) -> None:
+    top = Counter(freq).most_common(top_n)
+    if not top:
+        print("no words found")
+        return
+
+    words = [w for w, _ in top][::-1]
+    counts = [c for _, c in top][::-1]
+
+    plt.figure(figsize=(10, 6))
+    plt.barh(words, counts)
+    plt.xlabel("frequency")
+    plt.ylabel("words")
+    plt.title(f"top {top_n} most frequent words")
+    plt.tight_layout()
+    plt.show()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--url", required=True, help="url to download text from")
+    parser.add_argument("--top", type=int, default=10, help="top n words to visualize")
+    args = parser.parse_args()
+
+    try:
+        text = fetch_text(args.url)
+    except requests.RequestException as e:
+        print(f"failed to download url: {e}")
+        return
+
+    freq = map_reduce_word_count(text)
+    visualize_top_words(freq, args.top)
+
+
+if __name__ == "__main__":
+    main()
